@@ -3,14 +3,16 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import dynamic from 'next/dynamic';
+import ScenarioSimulator from '@/components/dashboard/ScenarioSimulator';
 
 const HeatMap = dynamic(() => import('@/components/map/HeatMap'), { ssr: false });
 
 const cities = ['Mumbai', 'Thane', 'Delhi', 'Bangalore', 'Chennai', 'Hyderabad', 'Pune'];
 
 const getRiskColor = (risk: string) => ({
-  low: '#00d4aa', medium: '#ffd700', high: '#ff6b35', extreme: '#ff3d3d'
-}[risk?.toLowerCase()] || '#fff');
+  low: '#00d4aa', medium: '#ffd700', high: '#ff6b35', extreme: '#ff3d3d',
+  Low: '#00d4aa', Medium: '#ffd700', High: '#ff6b35', Extreme: '#ff3d3d',
+}[risk] || '#fff');
 
 export default function Home() {
   const [selectedCity, setSelectedCity] = useState('Mumbai');
@@ -18,7 +20,7 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<any>(null);
   const [hotspots, setHotspots] = useState<any[]>([]);
   const [interventions, setInterventions] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'hotspots' | 'interventions' | 'predict'>('hotspots');
+  const [activeTab, setActiveTab] = useState<'hotspots' | 'interventions' | 'predict' | 'simulate'>('hotspots');
   const [predictInput, setPredictInput] = useState({ lst: 38, ndvi: 0.3, ndbi: 0.5, humidity: 60, buildingDensity: 65 });
   const [predictResult, setPredictResult] = useState<any>(null);
 
@@ -53,8 +55,6 @@ export default function Home() {
   const interventionIcons: any = {
     urban_greening: '🌳', cool_roof: '🏠', water_body: '💧', ventilation: '💨',
   };
-
-  const s = (obj: any) => ({ ...obj });
 
   return (
     <main style={{ minHeight: '100vh', background: '#0a0f1e', padding: '2rem', fontFamily: 'Inter, system-ui, sans-serif' }}>
@@ -102,7 +102,7 @@ export default function Home() {
           <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
             style={{ maxWidth: '1300px', margin: '0 auto' }}>
 
-            {/* Real Data Badge */}
+            {/* Badges */}
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
               style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
               <span style={{ background: 'rgba(0,212,170,0.15)', border: '1px solid #00d4aa40', borderRadius: '2rem', padding: '0.4rem 1rem', fontSize: '0.8rem', color: '#00d4aa', fontWeight: 600 }}>
@@ -138,7 +138,7 @@ export default function Home() {
               ))}
             </div>
 
-            {/* ML Recommendations */}
+            {/* AI Recommendations */}
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
               style={{ background: 'rgba(17,24,39,0.9)', border: '1px solid #1e2d4a', borderRadius: '16px', padding: '1.25rem', marginBottom: '1.5rem' }}>
               <h3 style={{ color: '#f0f4ff', fontWeight: 700, fontSize: '0.95rem', marginBottom: '0.75rem' }}>
@@ -175,6 +175,7 @@ export default function Home() {
                 { key: 'hotspots', label: '🔥 Heat Hotspots' },
                 { key: 'interventions', label: '❄️ Cooling Interventions' },
                 { key: 'predict', label: '🤖 Heat Risk Predictor' },
+                { key: 'simulate', label: '🧪 Scenario Simulator' },
               ].map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
                   style={{
@@ -256,7 +257,7 @@ export default function Home() {
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 style={{ background: 'rgba(17,24,39,0.9)', border: '1px solid #1e2d4a', borderRadius: '16px', padding: '1.5rem' }}>
                 <h3 style={{ color: '#f0f4ff', fontWeight: 700, marginBottom: '1.25rem', fontSize: '0.95rem' }}>
-                  🤖 Custom Heat Risk Predictor — Enter values to predict risk
+                  🤖 Custom Heat Risk Predictor
                 </h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
                   {[
@@ -282,7 +283,6 @@ export default function Home() {
                   style={{ padding: '0.75rem 2rem', borderRadius: '2rem', border: 'none', background: 'linear-gradient(135deg, #00d4aa, #0099ff)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '0.9rem' }}>
                   🤖 Predict Heat Risk
                 </button>
-
                 {predictResult && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                     style={{ marginTop: '1.25rem', padding: '1.25rem', background: '#0d1628', borderRadius: '12px', border: '1px solid #1e2d4a' }}>
@@ -306,6 +306,16 @@ export default function Home() {
                   </motion.div>
                 )}
               </motion.div>
+            )}
+
+            {/* Scenario Simulator */}
+            {activeTab === 'simulate' && (
+              <ScenarioSimulator
+                city={selectedCity}
+                baseLST={analysis.avgLST}
+                originalRisk={analysis.mlRiskLevel}
+                population={analysis.affectedPopulation}
+              />
             )}
 
           </motion.div>
