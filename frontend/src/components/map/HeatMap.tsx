@@ -134,15 +134,16 @@ export default function HeatMap({ city, hotspots }: HeatMapProps) {
         }
       `}</style>
       <div
-        ref={mapRef}
-        style={{
-          width: '100%',
-          height: '450px',
-          borderRadius: '16px',
-          overflow: 'hidden',
-          border: '1px solid #1e2d4a',
-        }}
-      />
+  ref={mapRef}
+  style={{
+    width: '100%',
+    height: '450px',
+    borderRadius: '16px',
+    overflow: 'hidden',
+    border: '1px solid #1e2d4a',
+    background: '#0a0f1e',
+  }}
+/>
     </>
   );
 }
