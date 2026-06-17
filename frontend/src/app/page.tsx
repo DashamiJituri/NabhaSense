@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import ScenarioSimulator from '@/components/dashboard/ScenarioSimulator';
+import CityComparison from '@/components/dashboard/CityComparison';
 
 const HeatMap = dynamic(() => import('@/components/map/HeatMap'), { ssr: false });
 
@@ -20,7 +21,7 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<any>(null);
   const [hotspots, setHotspots] = useState<any[]>([]);
   const [interventions, setInterventions] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'hotspots' | 'interventions' | 'predict' | 'simulate'>('hotspots');
+  const [activeTab, setActiveTab] = useState<'hotspots' | 'interventions' | 'predict' | 'simulate' | 'compare'>('hotspots');
   const [predictInput, setPredictInput] = useState({ lst: 38, ndvi: 0.3, ndbi: 0.5, humidity: 60, buildingDensity: 65 });
   const [predictResult, setPredictResult] = useState<any>(null);
 
@@ -176,6 +177,7 @@ export default function Home() {
                 { key: 'interventions', label: '❄️ Cooling Interventions' },
                 { key: 'predict', label: '🤖 Heat Risk Predictor' },
                 { key: 'simulate', label: '🧪 Scenario Simulator' },
+                { key: 'compare', label: '🏙️ City Comparison' },
               ].map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
                   style={{
@@ -316,6 +318,10 @@ export default function Home() {
                 originalRisk={analysis.mlRiskLevel}
                 population={analysis.affectedPopulation}
               />
+            )}
+            {/* City Comparison */}
+            {activeTab === 'compare' && (
+              <CityComparison />
             )}
 
           </motion.div>
