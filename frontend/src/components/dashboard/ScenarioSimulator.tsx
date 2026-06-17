@@ -23,7 +23,7 @@ export default function ScenarioSimulator({ city, baseLST, originalRisk, populat
   const simulate = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/heat/simulate', {
+      const res = await fetch('https://nabhasense-backend.onrender.com/heat/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

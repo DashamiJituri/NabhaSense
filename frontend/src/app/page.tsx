@@ -31,9 +31,9 @@ export default function Home() {
     setAnalysis(null);
     try {
       const [a, h, i] = await Promise.all([
-        fetch(`http://localhost:8000/heat/analysis/${city.toLowerCase()}`).then(r => r.json()),
-        fetch(`http://localhost:8000/heat/hotspots/${city.toLowerCase()}`).then(r => r.json()),
-        fetch(`http://localhost:8000/heat/interventions/${city.toLowerCase()}`).then(r => r.json()),
+        fetch(`https://nabhasense-backend.onrender.com/heat/analysis/${city.toLowerCase()}`).then(r => r.json()),
+        fetch(`https://nabhasense-backend.onrender.com/heat/hotspots/${city.toLowerCase()}`).then(r => r.json()),
+        fetch(`https://nabhasense-backend.onrender.com/heat/interventions/${city.toLowerCase()}`).then(r => r.json()),
       ]);
       setAnalysis(a);
       setHotspots(h.hotspots || []);
@@ -44,7 +44,7 @@ export default function Home() {
 
   const handlePredict = async () => {
     try {
-      const res = await fetch('http://localhost:8000/heat/predict', {
+      const res = await fetch('https://nabhasense-backend.onrender.com/heat/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(predictInput),

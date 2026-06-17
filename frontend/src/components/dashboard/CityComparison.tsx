@@ -13,7 +13,7 @@ export default function CityComparison() {
   const compare = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/heat/compare?cities=${selected.join(',')}`);
+      const res = await fetch(`https://nabhasense-backend.onrender.com/heat/compare?cities=${selected.join(',')}`);
       const json = await res.json();
       setData(json.comparison || []);
     } catch (e) { console.error(e); }
