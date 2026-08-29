@@ -1,16 +1,34 @@
 from fastapi import APIRouter
 from app.models.predictor import HeatPredictor
-from app.data.real_data import get_real_city_data
+from app.models.mortality_predictor import MortalityRiskPredictor
+from app.models.hsri_calculator import compute_hazard_index, compute_hsri
+from app.data.real_data import get_real_city_data, fetch_forecast, CITIES
+from app.data.demographics import (
+    get_city_demographics, get_city_exposure_baseline, get_ward_demographics,
+    vulnerability_multiplier, compute_vulnerability_index, compute_exposure_index,
+)
+from app.utils.thermal_indices import get_thermal_stress_index
+from app.utils.utci import utci_approx, classify_utci_stress
 
 router = APIRouter()
 predictor = HeatPredictor()
+mortality_predictor = MortalityRiskPredictor()
+
+
+def _compute_thermal_with_utci(temp_c, rh_pct, wind_speed_ms, shortwave_wm2):
+    """WBGT + Heat Index + UTCI, all from one weather reading."""
+    thermal = get_thermal_stress_index(temp_c, rh_pct, wind_speed_ms, shortwave_wm2)
+    utci_result = utci_approx(temp_c, rh_pct, wind_speed_ms, shortwave_wm2)
+    thermal["utci"] = utci_result["utci"]
+    thermal["utciNote"] = utci_result["utciNote"]
+    thermal["utciStressCategory"] = classify_utci_stress(utci_result["utci"])
+    return thermal
+
 
 @router.get("/analysis/{city}")
 async def get_heat_analysis(city: str):
-    # Real data fetch karo
     real_data = get_real_city_data(city)
-    
-    # ML prediction real data se
+
     ml_input = {
         "lst": real_data["historical_lst"]["avg_lst"],
         "ndvi": real_data["derived_metrics"]["ndvi"],
@@ -19,65 +37,221 @@ async def get_heat_analysis(city: str):
         "buildingDensity": 65.0,
     }
     ml_result = predictor.predict(ml_input)
-    
-    # Synthetic hotspots real LST se calibrate karo
     base_analysis = predictor.get_city_analysis(city)
-    
+
+    thermal = _compute_thermal_with_utci(
+        temp_c=real_data["real_weather"]["temperature"],
+        rh_pct=real_data["real_weather"]["humidity"],
+        wind_speed_ms=real_data["real_weather"]["wind_speed"],
+        shortwave_wm2=real_data["real_weather"].get("shortwave_radiation", 400.0),
+    )
+    demographics = get_city_demographics(city)
+    mortality = mortality_predictor.predict(
+        wbgt=thermal["wbgt"],
+        heat_index=thermal["heatIndex"],
+        elderly_pct=demographics["elderlyPct"],
+        outdoor_worker_pct=demographics["outdoorWorkerPct"],
+    )
+
     return {
         "city": real_data["city"],
         "state": real_data["state"],
-        
-        # Real data
         "currentTemp": real_data["real_weather"]["temperature"],
         "apparentTemp": real_data["real_weather"]["apparent_temp"],
         "humidity": real_data["real_weather"]["humidity"],
         "windSpeed": real_data["real_weather"]["wind_speed"],
-        
-        # Historical LST — real
         "avgLST": real_data["historical_lst"]["avg_lst"],
         "maxLST": real_data["historical_lst"]["max_lst"],
         "minLST": real_data["historical_lst"]["min_lst"],
         "lstPeriod": real_data["historical_lst"]["period"],
-        
-        # Physics metrics
         "ndvi": real_data["derived_metrics"]["ndvi"],
         "ndbi": real_data["derived_metrics"]["ndbi"],
         "suhii": real_data["derived_metrics"]["suhii"],
         "heatStressIndex": real_data["derived_metrics"]["heat_stress_index"],
-        
-        # ML results
         "mlRiskLevel": ml_result["riskLevel"],
         "mlConfidence": ml_result["confidence"],
         "recommendations": ml_result["recommendations"],
-        
-        # Synthetic augmented
         "hotspotCount": base_analysis["hotspotCount"],
         "riskDistribution": base_analysis["riskDistribution"],
         "dominantDriver": base_analysis["dominantDriver"],
         "coolingPotential": base_analysis["coolingPotential"],
         "affectedPopulation": base_analysis["affectedPopulation"],
-        
-        # Data quality
+        "thermalStress": thermal,
+        "mortalityRisk": mortality,
+        "demographics": demographics,
         "dataSource": real_data["real_weather"]["source"],
         "dataQuality": real_data["data_quality"],
         "lastUpdated": real_data["last_updated"],
     }
 
+
+@router.get("/thermal/{city}")
+async def get_thermal_analysis(city: str):
+    """WBGT + Heat Index + UTCI breakdown for a city, standalone."""
+    real_data = get_real_city_data(city)
+    thermal = _compute_thermal_with_utci(
+        temp_c=real_data["real_weather"]["temperature"],
+        rh_pct=real_data["real_weather"]["humidity"],
+        wind_speed_ms=real_data["real_weather"]["wind_speed"],
+        shortwave_wm2=real_data["real_weather"].get("shortwave_radiation", 400.0),
+    )
+    return {
+        "city": real_data["city"],
+        "currentTemp": real_data["real_weather"]["temperature"],
+        "humidity": real_data["real_weather"]["humidity"],
+        **thermal,
+    }
+
+
+@router.get("/mortality/{city}")
+async def get_mortality_risk(city: str):
+    """
+    Mortality Risk Index (ML) + HSRI (Hazard x VI x EI, research-grounded)
+    at city and ward level.
+    """
+    real_data = get_real_city_data(city)
+    thermal = _compute_thermal_with_utci(
+        temp_c=real_data["real_weather"]["temperature"],
+        rh_pct=real_data["real_weather"]["humidity"],
+        wind_speed_ms=real_data["real_weather"]["wind_speed"],
+        shortwave_wm2=real_data["real_weather"].get("shortwave_radiation", 400.0),
+    )
+    hazard_index = compute_hazard_index(thermal["wbgt"], thermal["utci"])
+
+    city_demo = get_city_demographics(city)
+    city_mortality = mortality_predictor.predict(
+        wbgt=thermal["wbgt"],
+        heat_index=thermal["heatIndex"],
+        elderly_pct=city_demo["elderlyPct"],
+        outdoor_worker_pct=city_demo["outdoorWorkerPct"],
+    )
+    city_exposure = get_city_exposure_baseline(city)
+    city_vi = compute_vulnerability_index(city_demo["elderlyPct"], city_demo["population"], city_demo["population"])
+    city_ei = compute_exposure_index(
+        city_exposure["marginalWorkerPct"], city_exposure["illiteracyPct"], city_exposure["poorHousingPct"],
+        city_exposure["noElectricityPct"], city_exposure["noWaterAccessPct"],
+    )
+    city_hsri = compute_hsri(hazard_index, city_vi, city_ei)
+
+    ward_list = get_ward_demographics(city)
+    avg_ward_pop = sum(w["population"] for w in ward_list) / len(ward_list)
+
+    ward_results = []
+    for ward in ward_list:
+        ward_mortality = mortality_predictor.predict(
+            wbgt=thermal["wbgt"],
+            heat_index=thermal["heatIndex"],
+            elderly_pct=ward["elderlyPct"],
+            outdoor_worker_pct=ward["outdoorWorkerPct"],
+        )
+        ward_vi = compute_vulnerability_index(ward["elderlyPct"], ward["population"], avg_ward_pop)
+        ward_ei = compute_exposure_index(
+            ward["marginalWorkerPct"], ward["illiteracyPct"], ward["poorHousingPct"],
+            ward["noElectricityPct"], ward["noWaterAccessPct"],
+        )
+        ward_hsri = compute_hsri(hazard_index, ward_vi, ward_ei)
+
+        ward_results.append({
+            **ward,
+            "vulnerabilityMultiplier": vulnerability_multiplier(ward["elderlyPct"], ward["outdoorWorkerPct"]),
+            "mortalityRiskIndex": ward_mortality["mortalityRiskIndex"],
+            "hospitalizationSpikeProbability": ward_mortality["hospitalizationSpikeProbability"],
+            "riskTier": ward_mortality["riskTier"],
+            "hsri": ward_hsri["hsri"],
+            "hsriTier": ward_hsri["hsriTier"],
+            "vulnerabilityIndex": ward_vi,
+            "exposureIndex": ward_ei,
+        })
+
+    ward_results.sort(key=lambda w: w["mortalityRiskIndex"], reverse=True)
+
+    return {
+        "city": real_data["city"],
+        "wbgt": thermal["wbgt"],
+        "utci": thermal["utci"],
+        "heatIndex": thermal["heatIndex"],
+        "cityLevel": {
+            **city_demo,
+            "vulnerabilityMultiplier": vulnerability_multiplier(city_demo["elderlyPct"], city_demo["outdoorWorkerPct"]),
+            **city_mortality,
+            "hsri": city_hsri["hsri"],
+            "hsriTier": city_hsri["hsriTier"],
+            "vulnerabilityIndex": city_vi,
+            "exposureIndex": city_ei,
+            "hazardIndex": hazard_index,
+        },
+        "hsriFormula": city_hsri["formula"],
+        "wardLevel": ward_results,
+    }
+
+
+@router.get("/forecast/{city}")
+async def get_heat_forecast(city: str, days: int = 5):
+    """3-5 day heat-mortality forecast (PS26083 core requirement)."""
+    city_info = CITIES.get(city.lower(), CITIES["mumbai"])
+    demographics = get_city_demographics(city)
+    days = max(3, min(days, 7))
+
+    raw_days = fetch_forecast(city_info["lat"], city_info["lng"], days=days)
+
+    forecast = []
+    for day in raw_days:
+        thermal = _compute_thermal_with_utci(
+            temp_c=day["peakTemp"],
+            rh_pct=day["peakHumidity"],
+            wind_speed_ms=day["windSpeed"],
+            shortwave_wm2=day["shortwaveRadiation"],
+        )
+        mortality = mortality_predictor.predict(
+            wbgt=thermal["wbgt"],
+            heat_index=thermal["heatIndex"],
+            elderly_pct=demographics["elderlyPct"],
+            outdoor_worker_pct=demographics["outdoorWorkerPct"],
+        )
+        forecast.append({
+            "date": day["date"],
+            "peakTemp": day["peakTemp"],
+            "peakHumidity": day["peakHumidity"],
+            "wbgt": thermal["wbgt"],
+            "utci": thermal["utci"],
+            "heatIndex": thermal["heatIndex"],
+            "stressCategory": thermal["stressCategory"],
+            "utciStressCategory": thermal["utciStressCategory"],
+            "mortalityRiskIndex": mortality["mortalityRiskIndex"],
+            "hospitalizationSpikeProbability": mortality["hospitalizationSpikeProbability"],
+            "riskTier": mortality["riskTier"],
+        })
+
+    worst_day = max(forecast, key=lambda d: d["mortalityRiskIndex"]) if forecast else None
+
+    return {
+        "city": city.capitalize(),
+        "forecastDays": len(forecast),
+        "forecast": forecast,
+        "worstDay": worst_day,
+        "source": "Open-Meteo Forecast API (hourly, peak-hour-per-day)",
+    }
+
+
 @router.get("/hotspots/{city}")
 async def get_hotspots(city: str):
     return predictor.get_hotspots(city)
+
 
 @router.get("/interventions/{city}")
 async def get_interventions(city: str):
     return predictor.get_cooling_interventions(city)
 
+
 @router.post("/predict")
 async def predict_heat_risk(data: dict):
     return predictor.predict(data)
 
+
 @router.get("/realdata/{city}")
 async def get_real_data(city: str):
     return get_real_city_data(city)
+
 
 @router.get("/compare")
 async def compare_cities(cities: str = "mumbai,delhi,bangalore"):
@@ -96,36 +270,24 @@ async def compare_cities(cities: str = "mumbai,delhi,bangalore"):
         })
     return {"comparison": results}
 
+
 @router.post("/simulate")
 async def simulate_cooling(data: dict):
     city = data.get("city", "mumbai")
     base_lst = data.get("baseLST", 38.0)
-    
-    # Intervention parameters
-    tree_cover_increase = data.get("treeCoverIncrease", 0)      # %
-    cool_roof_percentage = data.get("coolRoofPercentage", 0)    # %
-    water_body_increase = data.get("waterBodyIncrease", 0)      # %
-    albedo_increase = data.get("albedoIncrease", 0)             # 0-1
 
-    # Physics-informed cooling calculations
-    # Based on actual urban climate research papers
+    tree_cover_increase = data.get("treeCoverIncrease", 0)
+    cool_roof_percentage = data.get("coolRoofPercentage", 0)
+    water_body_increase = data.get("waterBodyIncrease", 0)
+    albedo_increase = data.get("albedoIncrease", 0)
 
-    # 1. Urban Greening — each 10% tree cover = ~0.5°C cooling
     tree_cooling = (tree_cover_increase / 10) * 0.5
-
-    # 2. Cool Roofs — Stefan-Boltzmann inspired
-    # Albedo increase from 0.2 to 0.7 = ~2-4°C cooling
     cool_roof_cooling = (cool_roof_percentage / 100) * (albedo_increase * 8)
-
-    # 3. Water Bodies — evaporative cooling
-    # Each 5% water body = ~0.3°C cooling
     water_cooling = (water_body_increase / 5) * 0.3
 
-    # Total cooling
     total_cooling = round(tree_cooling + cool_roof_cooling + water_cooling, 2)
     new_lst = round(base_lst - total_cooling, 2)
 
-    # New risk level
     if new_lst < 33:
         new_risk = "Low"
     elif new_lst < 38:

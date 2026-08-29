@@ -27,5 +27,25 @@ export const api = {
     });
     if (!res.ok) throw new Error('Prediction failed');
     return res.json();
-  }
+  },
+
+  // ── NEW: PS26083 additions ──
+
+  async getThermalStress(city: string) {
+    const res = await fetch(`${API_URL}/heat/thermal/${city}`);
+    if (!res.ok) throw new Error('Failed to fetch thermal stress data');
+    return res.json();
+  },
+
+  async getMortalityRisk(city: string) {
+    const res = await fetch(`${API_URL}/heat/mortality/${city}`);
+    if (!res.ok) throw new Error('Failed to fetch mortality risk data');
+    return res.json();
+  },
+
+  async getForecast(city: string, days: number = 5) {
+    const res = await fetch(`${API_URL}/heat/forecast/${city}?days=${days}`);
+    if (!res.ok) throw new Error('Failed to fetch forecast data');
+    return res.json();
+  },
 };

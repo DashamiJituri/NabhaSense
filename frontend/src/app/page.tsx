@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import ScenarioSimulator from '@/components/dashboard/ScenarioSimulator';
 import CityComparison from '@/components/dashboard/CityComparison';
+import ThermalMortalityPanel from '@/components/dashboard/ThermalMortalityPanel';
+import ForecastPanel from '@/components/dashboard/ForecastPanel';
 
 const HeatMap = dynamic(() => import('@/components/map/HeatMap'), { ssr: false });
 
@@ -21,7 +23,7 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<any>(null);
   const [hotspots, setHotspots] = useState<any[]>([]);
   const [interventions, setInterventions] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'hotspots' | 'interventions' | 'predict' | 'simulate' | 'compare'>('hotspots');
+  const [activeTab, setActiveTab] = useState<'hotspots' | 'thermal' | 'forecast' | 'interventions' | 'predict' | 'simulate' | 'compare'>('hotspots');
   const [predictInput, setPredictInput] = useState({ lst: 38, ndvi: 0.3, ndbi: 0.5, humidity: 60, buildingDensity: 65 });
   const [predictResult, setPredictResult] = useState<any>(null);
 
@@ -308,7 +310,7 @@ export default function Home() {
               <span style={{ color: '#f0f4ff' }}>Platform</span>
             </h1>
             <p style={{ color: '#6b7a90', fontSize: '1rem', maxWidth: '540px', margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
-              Physics-informed AI/ML system for urban heat stress detection and cooling intervention optimization
+              Physics-informed AI/ML system for urban heat stress detection, human thermal stress &amp; mortality-risk early warning
             </p>
 
             {/* City selector */}
@@ -435,6 +437,8 @@ export default function Home() {
                 <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
                   {[
                     { key: 'hotspots',      label: '🔥 Heat Hotspots' },
+                    { key: 'thermal',       label: '🧬 WBGT & Mortality Risk' },
+                    { key: 'forecast',      label: '📅 5-Day Forecast' },
                     { key: 'interventions', label: '❄️ Cooling Interventions' },
                     { key: 'predict',       label: '🤖 Heat Risk Predictor' },
                     { key: 'simulate',      label: '🧪 Scenario Simulator' },
@@ -490,6 +494,16 @@ export default function Home() {
                       </table>
                     </div>
                   </motion.div>
+                )}
+
+                {/* ── WBGT & Mortality Risk (PS26083) ── */}
+                {activeTab === 'thermal' && (
+                  <ThermalMortalityPanel city={selectedCity} />
+                )}
+
+                {/* ── 5-Day Forecast (PS26083) ── */}
+                {activeTab === 'forecast' && (
+                  <ForecastPanel city={selectedCity} />
                 )}
 
                 {/* ── Interventions ── */}
@@ -587,4 +601,3 @@ export default function Home() {
     </>
   );
 }
-

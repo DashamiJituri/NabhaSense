@@ -50,9 +50,11 @@ export default function HeatMap({ city, hotspots }: HeatMapProps) {
         zoomControl: true,
       });
 
-      // Dark theme map tiles
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '©OpenStreetMap ©CartoDB',
+      // FREE tiles, no API key ever required — standard OpenStreetMap raster tiles.
+      // Dark look is achieved with a CSS filter on the tile pane (no paid dark-theme
+      // tile provider needed — CartoDB's free dark tiles now require a signup/API key).
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
         maxZoom: 19,
       }).addTo(map);
 
@@ -132,18 +134,27 @@ export default function HeatMap({ city, hotspots }: HeatMapProps) {
         .leaflet-popup-tip {
           background: #111827 !important;
         }
+        /* Dark-mode tile filter — turns free OSM tiles into a dark map, no paid provider needed */
+        .heatmap-dark-tiles .leaflet-tile-pane {
+          filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.9);
+        }
+        .heatmap-dark-tiles .leaflet-marker-icon,
+        .heatmap-dark-tiles .leaflet-popup {
+          filter: none;
+        }
       `}</style>
       <div
-  ref={mapRef}
-  style={{
-    width: '100%',
-    height: '450px',
-    borderRadius: '16px',
-    overflow: 'hidden',
-    border: '1px solid #1e2d4a',
-    background: '#0a0f1e',
-  }}
-/>
+        ref={mapRef}
+        className="heatmap-dark-tiles"
+        style={{
+          width: '100%',
+          height: '450px',
+          borderRadius: '16px',
+          overflow: 'hidden',
+          border: '1px solid #1e2d4a',
+          background: '#0a0f1e',
+        }}
+      />
     </>
   );
 }

@@ -22,11 +22,12 @@ def fetch_real_weather(lat: float, lng: float) -> dict:
             "longitude": lng,
             "current": [
                 "temperature_2m",
-                "relative_humidity_2m", 
+                "relative_humidity_2m",
                 "apparent_temperature",
                 "surface_pressure",
                 "wind_speed_10m",
                 "cloud_cover",
+                "shortwave_radiation",
             ],
             "hourly": ["temperature_2m", "relative_humidity_2m"],
             "timezone": "Asia/Kolkata",
@@ -41,6 +42,7 @@ def fetch_real_weather(lat: float, lng: float) -> dict:
             "apparent_temp": current.get("apparent_temperature", 38.0),
             "wind_speed": current.get("wind_speed_10m", 10.0),
             "cloud_cover": current.get("cloud_cover", 20.0),
+            "shortwave_radiation": current.get("shortwave_radiation", 400.0),
             "source": "Open-Meteo Real-time API",
             "timestamp": datetime.now().isoformat(),
         }
@@ -52,6 +54,7 @@ def fetch_real_weather(lat: float, lng: float) -> dict:
             "apparent_temp": 38.0,
             "wind_speed": 10.0,
             "cloud_cover": 20.0,
+            "shortwave_radiation": 400.0,
             "source": "fallback",
             "timestamp": datetime.now().isoformat(),
         }
@@ -105,6 +108,83 @@ def fetch_historical_lst(lat: float, lng: float) -> dict:
             "period": "unavailable",
             "source": "fallback",
         }
+
+def fetch_forecast(lat: float, lng: float, days: int = 5) -> list:
+    """
+    Fetch hourly forecast from Open-Meteo (free, no API key) and pick the
+    peak-heat hour (max temperature) for each of the next `days` days.
+    That peak-hour reading is what feeds the WBGT/mortality-risk forecast —
+    early-warning systems care about the worst hour of the day, not the
+    daily average.
+    """
+    try:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lng,
+            "hourly": [
+                "temperature_2m",
+                "relative_humidity_2m",
+                "wind_speed_10m",
+                "shortwave_radiation",
+            ],
+            "timezone": "Asia/Kolkata",
+            "forecast_days": min(days, 7),
+        }
+        res = requests.get(url, params=params, timeout=10)
+        data = res.json()
+        hourly = data.get("hourly", {})
+
+        times = hourly.get("time", [])
+        temps = hourly.get("temperature_2m", [])
+        humidity = hourly.get("relative_humidity_2m", [])
+        wind = hourly.get("wind_speed_10m", [])
+        radiation = hourly.get("shortwave_radiation", [])
+
+        if not times:
+            raise ValueError("empty hourly forecast")
+
+        # Group hourly readings by calendar date, pick the hottest hour per day
+        by_date = {}
+        for i, t in enumerate(times):
+            date_str = t.split("T")[0]
+            entry = {
+                "temp": temps[i] if i < len(temps) else None,
+                "humidity": humidity[i] if i < len(humidity) else None,
+                "wind": wind[i] if i < len(wind) else None,
+                "radiation": radiation[i] if i < len(radiation) else None,
+            }
+            if entry["temp"] is None:
+                continue
+            if date_str not in by_date or entry["temp"] > by_date[date_str]["temp"]:
+                by_date[date_str] = entry
+
+        forecast_days = []
+        for date_str in sorted(by_date.keys())[:days]:
+            e = by_date[date_str]
+            forecast_days.append({
+                "date": date_str,
+                "peakTemp": round(e["temp"], 1),
+                "peakHumidity": round(e["humidity"] or 60.0, 1),
+                "windSpeed": round(e["wind"] or 10.0, 1),
+                "shortwaveRadiation": round(e["radiation"] or 400.0, 1),
+            })
+
+        return forecast_days
+    except Exception as ex:
+        print(f"Forecast API error: {ex}")
+        # Fallback — flat synthetic forecast so the UI doesn't break
+        base_date = datetime.now()
+        return [
+            {
+                "date": (base_date + timedelta(days=i)).strftime("%Y-%m-%d"),
+                "peakTemp": 36.0,
+                "peakHumidity": 65.0,
+                "windSpeed": 10.0,
+                "shortwaveRadiation": 450.0,
+            }
+            for i in range(days)
+        ]
 
 def calculate_ndvi_estimate(cloud_cover: float, temp: float) -> float:
     """
