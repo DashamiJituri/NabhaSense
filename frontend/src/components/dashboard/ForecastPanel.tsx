@@ -32,6 +32,7 @@ export default function ForecastPanel({ city }: ForecastPanelProps) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,15 +110,21 @@ export default function ForecastPanel({ city }: ForecastPanelProps) {
         </motion.div>
       )}
 
-      {/* ── Day-by-day cards ── */}
+      {/* ── Day-by-day cards (click to see ward-level forecast for that day) ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.9rem' }}>
         {data.forecast.map((day: any, i: number) => {
           const color = tierColor(day.riskTier);
           const barHeight = Math.max(8, (day.mortalityRiskIndex / maxMortality) * 60);
+          const isSelected = i === selectedDayIdx;
           return (
             <motion.div key={i} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.07 }}
-              style={{ ...cardStyle, textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+              onClick={() => setSelectedDayIdx(i)}
+              style={{
+                ...cardStyle, textAlign: 'center', position: 'relative', overflow: 'hidden', cursor: 'pointer',
+                border: isSelected ? `1.5px solid ${color}` : '1px solid rgba(30,45,74,0.8)',
+                boxShadow: isSelected ? `0 0 16px ${color}30` : 'none',
+              }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, transparent, ${color}60, transparent)` }} />
               <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#d0e0f0', marginBottom: '0.6rem' }}>{dayLabel(day.date)}</div>
 
@@ -139,10 +146,52 @@ export default function ForecastPanel({ city }: ForecastPanelProps) {
                 <span>WBGT {day.wbgt}°C ({day.stressCategory})</span>
                 <span>🚑 Spike {day.hospitalizationSpikeProbability}%</span>
               </div>
+              {isSelected && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.62rem', color, fontWeight: 700 }}>▼ VIEWING WARDS</div>
+              )}
             </motion.div>
           );
         })}
       </div>
+
+      {/* ── Ward-level forecast for selected day (fills "dynamic, forecast-based ward risk" gap) ── */}
+      {data.forecast[selectedDayIdx]?.wardForecast?.length > 0 && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '1rem 1.25rem 0.5rem' }}>
+            <h3 style={{ color: '#f0f4ff', fontWeight: 700, fontSize: '0.9rem' }}>
+              📍 Ward-Level HSRI Forecast — {dayLabel(data.forecast[selectedDayIdx].date)}
+            </h3>
+            <p style={{ fontSize: '0.68rem', color: '#5a6b82', marginTop: '0.2rem' }}>
+              Ward risk recomputed against this day's forecasted WBGT/UTCI — not a static one-time snapshot.
+            </p>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(30,45,74,0.8)' }}>
+                  {['Ward', 'HSRI', 'Tier'].map(h => (
+                    <th key={h} style={{ padding: '0.6rem 1rem', textAlign: 'left', color: '#5a6b82', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.forecast[selectedDayIdx].wardForecast.map((w: any, i: number) => (
+                  <tr key={i} style={{ borderBottom: '1px solid rgba(10,15,30,0.5)' }}>
+                    <td style={{ padding: '0.55rem 1rem', color: '#d0e0f0' }}>{w.ward}</td>
+                    <td style={{ padding: '0.55rem 1rem', fontWeight: 700, color: tierColor(w.hsriTier) }}>{w.hsri}</td>
+                    <td style={{ padding: '0.55rem 1rem' }}>
+                      <span style={{ padding: '0.15rem 0.55rem', borderRadius: '2rem', fontSize: '0.65rem', fontWeight: 700, background: `${tierColor(w.hsriTier)}18`, color: tierColor(w.hsriTier), border: `1px solid ${tierColor(w.hsriTier)}35` }}>
+                        {w.hsriTier.toUpperCase()}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </motion.div>
+      )}
 
       <div style={{ fontSize: '0.7rem', color: '#5a6b82', textAlign: 'center' }}>
         📡 Source: {data.source}

@@ -16,6 +16,8 @@ weather will do."
 
 import math
 
+from app.data.hospital_capacity import compute_capacity_alert
+
 
 def _cooling_centers_needed(vulnerable_population: int, capacity_per_center: int = 5000) -> int:
     if vulnerable_population <= 0:
@@ -80,6 +82,7 @@ def generate_action_plan(city: str, stress_category: str, wbgt: float, utci: flo
 
     work_advisory = _work_hour_advisory(stress_category)
     grid_alert = _power_grid_alert(stress_category, hospitalization_spike_prob, population)
+    capacity_alert = compute_capacity_alert(vulnerable_population, hospitalization_spike_prob, city)
 
     overall_alert_level = "Watch"
     if stress_category in ["Very High", "Extreme"] or mortality_risk_index > 55:
@@ -104,4 +107,5 @@ def generate_action_plan(city: str, stress_category: str, wbgt: float, utci: flo
         },
         "outdoorWorkAdvisory": work_advisory,
         "powerGridAlert": grid_alert,
+        "hospitalCapacityAlert": capacity_alert,
     }

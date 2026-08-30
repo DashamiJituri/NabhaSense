@@ -10,19 +10,30 @@ from app.data.demographics import (
 )
 from app.utils.thermal_indices import get_thermal_stress_index
 from app.utils.utci import utci_approx, classify_utci_stress
+from app.utils.acclimatization import classify_wbgt_stress_localized, classify_utci_stress_localized
 
 router = APIRouter()
 predictor = HeatPredictor()
 mortality_predictor = MortalityRiskPredictor()
 
 
-def _compute_thermal_with_utci(temp_c, rh_pct, wind_speed_ms, shortwave_wm2):
-    """WBGT + Heat Index + UTCI, all from one weather reading."""
+def _compute_thermal_with_utci(city, temp_c, rh_pct, wind_speed_ms, shortwave_wm2):
+    """
+    WBGT + Heat Index + UTCI, all from one weather reading — stress
+    categories are acclimatization-adjusted per city (see utils/acclimatization.py),
+    implementing the 2008 review paper's insight that heat-mortality
+    thresholds are climate/location-dependent, not universal.
+    """
     thermal = get_thermal_stress_index(temp_c, rh_pct, wind_speed_ms, shortwave_wm2)
     utci_result = utci_approx(temp_c, rh_pct, wind_speed_ms, shortwave_wm2)
     thermal["utci"] = utci_result["utci"]
     thermal["utciNote"] = utci_result["utciNote"]
-    thermal["utciStressCategory"] = classify_utci_stress(utci_result["utci"])
+
+    wbgt_localized = classify_wbgt_stress_localized(thermal["wbgt"], city)
+    utci_localized = classify_utci_stress_localized(utci_result["utci"], city)
+    thermal["stressCategory"] = wbgt_localized["category"]
+    thermal["utciStressCategory"] = utci_localized["category"]
+    thermal["acclimatizationShift"] = wbgt_localized["acclimatizationShift"]
     return thermal
 
 
@@ -41,6 +52,7 @@ async def get_heat_analysis(city: str):
     base_analysis = predictor.get_city_analysis(city)
 
     thermal = _compute_thermal_with_utci(
+        city,
         temp_c=real_data["real_weather"]["temperature"],
         rh_pct=real_data["real_weather"]["humidity"],
         wind_speed_ms=real_data["real_weather"]["wind_speed"],
@@ -91,6 +103,7 @@ async def get_thermal_analysis(city: str):
     """WBGT + Heat Index + UTCI breakdown for a city, standalone."""
     real_data = get_real_city_data(city)
     thermal = _compute_thermal_with_utci(
+        city,
         temp_c=real_data["real_weather"]["temperature"],
         rh_pct=real_data["real_weather"]["humidity"],
         wind_speed_ms=real_data["real_weather"]["wind_speed"],
@@ -112,6 +125,7 @@ async def get_mortality_risk(city: str):
     """
     real_data = get_real_city_data(city)
     thermal = _compute_thermal_with_utci(
+        city,
         temp_c=real_data["real_weather"]["temperature"],
         rh_pct=real_data["real_weather"]["humidity"],
         wind_speed_ms=real_data["real_weather"]["wind_speed"],
@@ -187,17 +201,31 @@ async def get_mortality_risk(city: str):
 
 
 @router.get("/forecast/{city}")
-async def get_heat_forecast(city: str, days: int = 5):
-    """3-5 day heat-mortality forecast (PS26083 core requirement)."""
+async def get_heat_forecast(city: str, days: int = 5, include_wards: bool = True):
+    """
+    3-5 day heat-mortality forecast (PS26083 core requirement).
+
+    include_wards=True also recomputes ward-level HSRI for each forecast
+    day — directly answering the 2026 Mumbai paper's own open question:
+    "Can we move from static ward-level risk mapping toward finer-grained,
+    dynamic, forecast-based heat-risk warnings?" Their ward-level HSRI was
+    a one-time snapshot; here it's recomputed against each of the next
+    3-5 days' predicted WBGT/UTCI.
+    """
     city_info = CITIES.get(city.lower(), CITIES["mumbai"])
     demographics = get_city_demographics(city)
+    exposure = get_city_exposure_baseline(city)
     days = max(3, min(days, 7))
+
+    ward_list = get_ward_demographics(city) if include_wards else []
+    avg_ward_pop = sum(w["population"] for w in ward_list) / len(ward_list) if ward_list else 1
 
     raw_days = fetch_forecast(city_info["lat"], city_info["lng"], days=days)
 
     forecast = []
     for day in raw_days:
         thermal = _compute_thermal_with_utci(
+            city,
             temp_c=day["peakTemp"],
             rh_pct=day["peakHumidity"],
             wind_speed_ms=day["windSpeed"],
@@ -209,6 +237,24 @@ async def get_heat_forecast(city: str, days: int = 5):
             elderly_pct=demographics["elderlyPct"],
             outdoor_worker_pct=demographics["outdoorWorkerPct"],
         )
+
+        ward_forecast = []
+        if include_wards:
+            hazard_index = compute_hazard_index(thermal["wbgt"], thermal["utci"])
+            for ward in ward_list:
+                ward_vi = compute_vulnerability_index(ward["elderlyPct"], ward["population"], avg_ward_pop)
+                ward_ei = compute_exposure_index(
+                    ward["marginalWorkerPct"], ward["illiteracyPct"], ward["poorHousingPct"],
+                    ward["noElectricityPct"], ward["noWaterAccessPct"],
+                )
+                ward_hsri = compute_hsri(hazard_index, ward_vi, ward_ei)
+                ward_forecast.append({
+                    "ward": ward["ward"],
+                    "hsri": ward_hsri["hsri"],
+                    "hsriTier": ward_hsri["hsriTier"],
+                })
+            ward_forecast.sort(key=lambda w: w["hsri"], reverse=True)
+
         forecast.append({
             "date": day["date"],
             "peakTemp": day["peakTemp"],
@@ -221,6 +267,7 @@ async def get_heat_forecast(city: str, days: int = 5):
             "mortalityRiskIndex": mortality["mortalityRiskIndex"],
             "hospitalizationSpikeProbability": mortality["hospitalizationSpikeProbability"],
             "riskTier": mortality["riskTier"],
+            "wardForecast": ward_forecast,
         })
 
     worst_day = max(forecast, key=lambda d: d["mortalityRiskIndex"]) if forecast else None
@@ -244,6 +291,7 @@ async def get_action_plan(city: str):
     """
     real_data = get_real_city_data(city)
     thermal = _compute_thermal_with_utci(
+        city,
         temp_c=real_data["real_weather"]["temperature"],
         rh_pct=real_data["real_weather"]["humidity"],
         wind_speed_ms=real_data["real_weather"]["wind_speed"],
@@ -300,8 +348,8 @@ async def simulate_action_plan(data: dict):
 
     adjusted_temp = round(base_temp - total_cooling, 2)
 
-    before_thermal = _compute_thermal_with_utci(base_temp, humidity, wind_speed, shortwave)
-    after_thermal = _compute_thermal_with_utci(adjusted_temp, humidity, wind_speed, shortwave)
+    before_thermal = _compute_thermal_with_utci(city, base_temp, humidity, wind_speed, shortwave)
+    after_thermal = _compute_thermal_with_utci(city, adjusted_temp, humidity, wind_speed, shortwave)
 
     before_mortality = mortality_predictor.predict(before_thermal["wbgt"], before_thermal["heatIndex"], elderly_pct, outdoor_worker_pct)
     after_mortality = mortality_predictor.predict(after_thermal["wbgt"], after_thermal["heatIndex"], elderly_pct, outdoor_worker_pct)
@@ -353,6 +401,7 @@ async def compare_cities(cities: str = "mumbai,delhi,bangalore"):
     for city in city_list[:7]:
         real_data = get_real_city_data(city)
         thermal = _compute_thermal_with_utci(
+            city,
             temp_c=real_data["real_weather"]["temperature"],
             rh_pct=real_data["real_weather"]["humidity"],
             wind_speed_ms=real_data["real_weather"]["wind_speed"],

@@ -54,6 +54,7 @@ export interface ThermalIndices {
   utci: number;
   utciNote: string;
   utciStressCategory: 'No Stress' | 'Moderate Heat Stress' | 'Strong Heat Stress' | 'Very Strong Heat Stress' | 'Extreme Heat Stress';
+  acclimatizationShift: number;
 }
 
 export interface MortalityRiskResult {
@@ -95,6 +96,12 @@ export interface MortalityRiskResponse {
   wardLevel: WardMortalityRisk[];
 }
 
+export interface WardForecastEntry {
+  ward: string;
+  hsri: number;
+  hsriTier: 'Low' | 'Moderate' | 'High' | 'Critical';
+}
+
 export interface ForecastDay {
   date: string;
   peakTemp: number;
@@ -107,6 +114,7 @@ export interface ForecastDay {
   mortalityRiskIndex: number;
   hospitalizationSpikeProbability: number;
   riskTier: 'Low' | 'Moderate' | 'High' | 'Critical';
+  wardForecast: WardForecastEntry[];
 }
 
 export interface ForecastResponse {
@@ -137,6 +145,15 @@ export interface PowerGridAlert {
   recommendedAction: string | null;
 }
 
+export interface HospitalCapacityAlert {
+  totalHospitalBeds: number;
+  surgeCapacityBeds: number;
+  predictedHeatAdmissions: number;
+  capacityUtilizationPct: number;
+  exceedsCapacity: boolean;
+  note: string;
+}
+
 export interface ActionPlanResponse {
   city: string;
   overallAlertLevel: 'Watch' | 'Yellow Alert' | 'Orange Alert' | 'Red Alert';
@@ -147,6 +164,7 @@ export interface ActionPlanResponse {
   coolingCenters: CoolingCentersAdvisory;
   outdoorWorkAdvisory: WorkAdvisory;
   powerGridAlert: PowerGridAlert;
+  hospitalCapacityAlert: HospitalCapacityAlert;
 }
 
 export interface ActionPlanSimulationResponse {

@@ -119,7 +119,11 @@ export default function ThermalMortalityPanel({ city }: ThermalMortalityPanelPro
           The <strong>HSRI = Hazard × Vulnerability × Exposure</strong> model below follows the exact methodology from the
           <em> 2026 Mumbai coastal-city heat-stress-warning framework</em>, extended here to be dynamic, forecast-based,
           and comparable across 7 cities — the multi-city, interactive, mitigation-testable system that paper's own
-          "Research Gap" section says doesn't yet exist.
+          "Research Gap" section says doesn't yet exist. Three gaps that paper explicitly flagged as unresolved are
+          also closed here: <strong>climate-acclimatized thresholds</strong> (2008 review, insight #2 — see the note below),
+          <strong> ward-level forecasting</strong> instead of a static snapshot (see the 5-Day Forecast tab), and
+          <strong> hospital-capacity comparison</strong> (see the Heat Action Plan tab) — all three explicitly named as
+          limitations or wishlist items the studied papers couldn't implement.
         </p>
       </motion.div>
 
@@ -171,6 +175,9 @@ export default function ThermalMortalityPanel({ city }: ThermalMortalityPanelPro
         </div>
         <div style={{ fontSize: '0.72rem', color: '#5a6b82', padding: '0.5rem 0.9rem', background: 'rgba(255,152,0,0.06)', border: '1px solid rgba(255,152,0,0.2)', borderRadius: '8px' }}>
           ⚠️ UTCI: {thermal.utciNote}
+        </div>
+        <div style={{ fontSize: '0.72rem', color: '#8892b0', padding: '0.5rem 0.9rem', background: 'rgba(0,212,170,0.06)', border: '1px solid rgba(0,212,170,0.2)', borderRadius: '8px' }}>
+          🌡️ <strong style={{ color: '#00d4aa' }}>Acclimatization-adjusted:</strong> stress category boundaries are shifted {thermal.acclimatizationShift >= 0 ? '+' : ''}{thermal.acclimatizationShift}°C for {city} relative to the national baseline — per the 2008 review's finding that heat-mortality thresholds differ between populations acclimatized to hotter vs. cooler climates.
         </div>
       </div>
 
