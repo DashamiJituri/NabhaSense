@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from app.models.predictor import HeatPredictor
 from app.models.mortality_predictor import MortalityRiskPredictor
 from app.models.hsri_calculator import compute_hazard_index, compute_hsri
+from app.models.heat_action_plan import generate_action_plan
 from app.data.real_data import get_real_city_data, fetch_forecast, CITIES
 from app.data.demographics import (
     get_city_demographics, get_city_exposure_baseline, get_ward_demographics,
@@ -233,6 +234,93 @@ async def get_heat_forecast(city: str, days: int = 5):
     }
 
 
+@router.get("/action-plan/{city}")
+async def get_action_plan(city: str):
+    """
+    Automated Heat Action Plan advisory (PS26083 requirement #7): cooling
+    center activation, outdoor-work-hour advisory, and power-grid alert,
+    generated from the current WBGT/UTCI stress category and Mortality
+    Risk Index.
+    """
+    real_data = get_real_city_data(city)
+    thermal = _compute_thermal_with_utci(
+        temp_c=real_data["real_weather"]["temperature"],
+        rh_pct=real_data["real_weather"]["humidity"],
+        wind_speed_ms=real_data["real_weather"]["wind_speed"],
+        shortwave_wm2=real_data["real_weather"].get("shortwave_radiation", 400.0),
+    )
+    demographics = get_city_demographics(city)
+    mortality = mortality_predictor.predict(
+        wbgt=thermal["wbgt"],
+        heat_index=thermal["heatIndex"],
+        elderly_pct=demographics["elderlyPct"],
+        outdoor_worker_pct=demographics["outdoorWorkerPct"],
+    )
+
+    plan = generate_action_plan(
+        city=city,
+        stress_category=thermal["stressCategory"],
+        wbgt=thermal["wbgt"],
+        utci=thermal["utci"],
+        mortality_risk_index=mortality["mortalityRiskIndex"],
+        hospitalization_spike_prob=mortality["hospitalizationSpikeProbability"],
+        elderly_pct=demographics["elderlyPct"],
+        outdoor_worker_pct=demographics["outdoorWorkerPct"],
+        population=demographics["population"],
+    )
+    return plan
+
+
+@router.post("/action-plan/simulate")
+async def simulate_action_plan(data: dict):
+    """
+    Test a mitigation scenario against the Heat Action Plan: apply the same
+    cooling-intervention physics as /heat/simulate, then re-run the WBGT ->
+    mortality -> action-plan pipeline on the adjusted temperature to show
+    whether the intervention would downgrade the alert level.
+    """
+    city = data.get("city", "mumbai")
+    base_temp = data.get("baseTemp", 36.0)
+    humidity = data.get("humidity", 60.0)
+    wind_speed = data.get("windSpeed", 10.0)
+    shortwave = data.get("shortwaveRadiation", 400.0)
+    elderly_pct = data.get("elderlyPct", 8.0)
+    outdoor_worker_pct = data.get("outdoorWorkerPct", 22.0)
+    population = data.get("population", 1000000)
+
+    tree_cover_increase = data.get("treeCoverIncrease", 0)
+    cool_roof_percentage = data.get("coolRoofPercentage", 0)
+    water_body_increase = data.get("waterBodyIncrease", 0)
+    albedo_increase = data.get("albedoIncrease", 0)
+
+    tree_cooling = (tree_cover_increase / 10) * 0.5
+    cool_roof_cooling = (cool_roof_percentage / 100) * (albedo_increase * 8)
+    water_cooling = (water_body_increase / 5) * 0.3
+    total_cooling = round(tree_cooling + cool_roof_cooling + water_cooling, 2)
+
+    adjusted_temp = round(base_temp - total_cooling, 2)
+
+    before_thermal = _compute_thermal_with_utci(base_temp, humidity, wind_speed, shortwave)
+    after_thermal = _compute_thermal_with_utci(adjusted_temp, humidity, wind_speed, shortwave)
+
+    before_mortality = mortality_predictor.predict(before_thermal["wbgt"], before_thermal["heatIndex"], elderly_pct, outdoor_worker_pct)
+    after_mortality = mortality_predictor.predict(after_thermal["wbgt"], after_thermal["heatIndex"], elderly_pct, outdoor_worker_pct)
+
+    before_plan = generate_action_plan(city, before_thermal["stressCategory"], before_thermal["wbgt"], before_thermal["utci"],
+                                        before_mortality["mortalityRiskIndex"], before_mortality["hospitalizationSpikeProbability"],
+                                        elderly_pct, outdoor_worker_pct, population)
+    after_plan = generate_action_plan(city, after_thermal["stressCategory"], after_thermal["wbgt"], after_thermal["utci"],
+                                       after_mortality["mortalityRiskIndex"], after_mortality["hospitalizationSpikeProbability"],
+                                       elderly_pct, outdoor_worker_pct, population)
+
+    return {
+        "totalCooling": total_cooling,
+        "before": {"temp": base_temp, "thermal": before_thermal, "mortality": before_mortality, "plan": before_plan},
+        "after": {"temp": adjusted_temp, "thermal": after_thermal, "mortality": after_mortality, "plan": after_plan},
+        "alertDowngraded": before_plan["overallAlertLevel"] != after_plan["overallAlertLevel"],
+    }
+
+
 @router.get("/hotspots/{city}")
 async def get_hotspots(city: str):
     return predictor.get_hotspots(city)
@@ -255,10 +343,37 @@ async def get_real_data(city: str):
 
 @router.get("/compare")
 async def compare_cities(cities: str = "mumbai,delhi,bangalore"):
+    """
+    Multi-city comparison — includes WBGT, UTCI, Mortality Risk Index and
+    HSRI alongside LST/NDVI/NDBI/SUHII, so cities compare on actual human
+    thermal-stress and health-risk terms, not just raw surface temperature.
+    """
     city_list = [c.strip() for c in cities.split(",")]
     results = []
-    for city in city_list[:5]:
+    for city in city_list[:7]:
         real_data = get_real_city_data(city)
+        thermal = _compute_thermal_with_utci(
+            temp_c=real_data["real_weather"]["temperature"],
+            rh_pct=real_data["real_weather"]["humidity"],
+            wind_speed_ms=real_data["real_weather"]["wind_speed"],
+            shortwave_wm2=real_data["real_weather"].get("shortwave_radiation", 400.0),
+        )
+        demographics = get_city_demographics(city)
+        mortality = mortality_predictor.predict(
+            wbgt=thermal["wbgt"],
+            heat_index=thermal["heatIndex"],
+            elderly_pct=demographics["elderlyPct"],
+            outdoor_worker_pct=demographics["outdoorWorkerPct"],
+        )
+        exposure = get_city_exposure_baseline(city)
+        vi = compute_vulnerability_index(demographics["elderlyPct"], demographics["population"], demographics["population"])
+        ei = compute_exposure_index(
+            exposure["marginalWorkerPct"], exposure["illiteracyPct"], exposure["poorHousingPct"],
+            exposure["noElectricityPct"], exposure["noWaterAccessPct"],
+        )
+        hazard_index = compute_hazard_index(thermal["wbgt"], thermal["utci"])
+        hsri = compute_hsri(hazard_index, vi, ei)
+
         results.append({
             "city": real_data["city"],
             "currentTemp": real_data["real_weather"]["temperature"],
@@ -266,6 +381,13 @@ async def compare_cities(cities: str = "mumbai,delhi,bangalore"):
             "suhii": real_data["derived_metrics"]["suhii"],
             "ndvi": real_data["derived_metrics"]["ndvi"],
             "ndbi": real_data["derived_metrics"]["ndbi"],
+            "wbgt": thermal["wbgt"],
+            "utci": thermal["utci"],
+            "stressCategory": thermal["stressCategory"],
+            "mortalityRiskIndex": mortality["mortalityRiskIndex"],
+            "riskTier": mortality["riskTier"],
+            "hsri": hsri["hsri"],
+            "hsriTier": hsri["hsriTier"],
             "dataQuality": real_data["data_quality"],
         })
     return {"comparison": results}

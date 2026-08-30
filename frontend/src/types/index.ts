@@ -116,3 +116,42 @@ export interface ForecastResponse {
   worstDay: ForecastDay | null;
   source: string;
 }
+
+// ── Heat Action Plan (replaces Predictor + Simulator) ──
+
+export interface CoolingCentersAdvisory {
+  triggered: boolean;
+  centersRecommended: number;
+  vulnerablePopulationCovered: number;
+  capacityPerCenter: number;
+}
+
+export interface WorkAdvisory {
+  restriction: string;
+  guidance: string;
+}
+
+export interface PowerGridAlert {
+  triggered: boolean;
+  reason: string | null;
+  recommendedAction: string | null;
+}
+
+export interface ActionPlanResponse {
+  city: string;
+  overallAlertLevel: 'Watch' | 'Yellow Alert' | 'Orange Alert' | 'Red Alert';
+  stressCategory: string;
+  wbgt: number;
+  utci: number;
+  mortalityRiskIndex: number;
+  coolingCenters: CoolingCentersAdvisory;
+  outdoorWorkAdvisory: WorkAdvisory;
+  powerGridAlert: PowerGridAlert;
+}
+
+export interface ActionPlanSimulationResponse {
+  totalCooling: number;
+  before: { temp: number; thermal: any; mortality: any; plan: ActionPlanResponse };
+  after: { temp: number; thermal: any; mortality: any; plan: ActionPlanResponse };
+  alertDowngraded: boolean;
+}

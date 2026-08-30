@@ -3,10 +3,10 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import dynamic from 'next/dynamic';
-import ScenarioSimulator from '@/components/dashboard/ScenarioSimulator';
 import CityComparison from '@/components/dashboard/CityComparison';
 import ThermalMortalityPanel from '@/components/dashboard/ThermalMortalityPanel';
 import ForecastPanel from '@/components/dashboard/ForecastPanel';
+import HeatActionPlanPanel from '@/components/dashboard/HeatActionPlanPanel';
 
 const HeatMap = dynamic(() => import('@/components/map/HeatMap'), { ssr: false });
 
@@ -23,9 +23,7 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<any>(null);
   const [hotspots, setHotspots] = useState<any[]>([]);
   const [interventions, setInterventions] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'hotspots' | 'thermal' | 'forecast' | 'interventions' | 'predict' | 'simulate' | 'compare'>('hotspots');
-  const [predictInput, setPredictInput] = useState({ lst: 38, ndvi: 0.3, ndbi: 0.5, humidity: 60, buildingDensity: 65 });
-  const [predictResult, setPredictResult] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'hotspots' | 'thermal' | 'forecast' | 'interventions' | 'actionplan' | 'compare'>('hotspots');
 
   const analyzeCity = async (city: string) => {
     setLoading(true);
@@ -42,17 +40,6 @@ export default function Home() {
       setInterventions(i.interventions || []);
     } catch (e) { console.error(e); }
     setLoading(false);
-  };
-
-  const handlePredict = async () => {
-    try {
-      const res = await fetch('https://nabhasense-backend.onrender.com/heat/predict', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(predictInput),
-      });
-      setPredictResult(await res.json());
-    } catch (e) { console.error(e); }
   };
 
   const interventionIcons: any = {
@@ -440,8 +427,7 @@ export default function Home() {
                     { key: 'thermal',       label: '🧬 WBGT & Mortality Risk' },
                     { key: 'forecast',      label: '📅 5-Day Forecast' },
                     { key: 'interventions', label: '❄️ Cooling Interventions' },
-                    { key: 'predict',       label: '🤖 Heat Risk Predictor' },
-                    { key: 'simulate',      label: '🧪 Scenario Simulator' },
+                    { key: 'actionplan',    label: '🚨 Heat Action Plan' },
                     { key: 'compare',       label: '🏙️ City Comparison' },
                   ].map(tab => (
                     <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
@@ -533,58 +519,17 @@ export default function Home() {
                   </motion.div>
                 )}
 
-                {/* ── Predictor ── */}
-                {activeTab === 'predict' && (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                    style={{ background: 'rgba(13,22,40,0.75)', backdropFilter: 'blur(16px)', border: '1px solid rgba(30,45,74,0.8)', borderRadius: '16px', padding: '1.5rem' }}>
-                    <h3 style={{ color: '#f0f4ff', fontWeight: 700, marginBottom: '1.25rem', fontSize: '0.95rem' }}>🤖 Custom Heat Risk Predictor</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
-                      {[
-                        { key: 'lst', label: 'Land Surface Temp (°C)', min: 20, max: 60, step: 0.1 },
-                        { key: 'ndvi', label: 'NDVI (Vegetation)', min: -0.2, max: 0.9, step: 0.01 },
-                        { key: 'ndbi', label: 'NDBI (Built-up)', min: 0.1, max: 0.9, step: 0.01 },
-                        { key: 'humidity', label: 'Humidity (%)', min: 10, max: 100, step: 1 },
-                        { key: 'buildingDensity', label: 'Building Density (%)', min: 0, max: 100, step: 1 },
-                      ].map(field => (
-                        <div key={field.key}>
-                          <label style={{ fontSize: '0.75rem', color: '#5a6b82', display: 'block', marginBottom: '0.4rem' }}>{field.label}</label>
-                          <input type="range" min={field.min} max={field.max} step={field.step}
-                            value={(predictInput as any)[field.key]}
-                            onChange={e => setPredictInput(prev => ({ ...prev, [field.key]: parseFloat(e.target.value) }))}
-                            style={{ width: '100%', accentColor: '#00d4aa' }} />
-                          <div style={{ fontSize: '0.85rem', color: '#00d4aa', fontWeight: 700, textAlign: 'center' }}>{(predictInput as any)[field.key]}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <button onClick={handlePredict}
-                      style={{ padding: '0.75rem 2rem', borderRadius: '2rem', border: 'none', background: 'linear-gradient(135deg, #00d4aa, #0099ff)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '0.9rem', boxShadow: '0 0 20px rgba(0,212,170,0.3)' }}>
-                      🤖 Predict Heat Risk
-                    </button>
-                    {predictResult && (
-                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                        style={{ marginTop: '1.25rem', padding: '1.25rem', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid rgba(30,45,74,0.8)' }}>
-                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: getRiskColor(predictResult.riskLevel), marginBottom: '0.5rem' }}>
-                          {predictResult.riskLevel} Risk — {predictResult.confidence}% confidence
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-                          {Object.entries(predictResult.probabilities || {}).map(([level, prob]: any) => (
-                            <span key={level} style={{ fontSize: '0.78rem', padding: '0.25rem 0.6rem', borderRadius: '4px', background: `${getRiskColor(level)}15`, color: getRiskColor(level) }}>
-                              {level}: {prob}%
-                            </span>
-                          ))}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          {predictResult.recommendations?.map((r: string, i: number) => (
-                            <span key={i} style={{ fontSize: '0.78rem', padding: '0.25rem 0.75rem', borderRadius: '6px', background: 'rgba(0,212,170,0.08)', color: '#00d4aa', border: '1px solid rgba(0,212,170,0.2)' }}>✓ {r}</span>
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
-                  </motion.div>
-                )}
-
-                {activeTab === 'simulate' && (
-                  <ScenarioSimulator city={selectedCity} baseLST={analysis.avgLST} originalRisk={analysis.mlRiskLevel} population={analysis.affectedPopulation} />
+                {/* ── Heat Action Plan (replaces Predictor + Simulator) ── */}
+                {activeTab === 'actionplan' && (
+                  <HeatActionPlanPanel
+                    city={selectedCity}
+                    baseTemp={analysis.currentTemp}
+                    humidity={analysis.humidity}
+                    windSpeed={analysis.windSpeed}
+                    elderlyPct={analysis.demographics?.elderlyPct ?? 8.0}
+                    outdoorWorkerPct={analysis.demographics?.outdoorWorkerPct ?? 22.0}
+                    population={analysis.demographics?.population ?? analysis.affectedPopulation ?? 1000000}
+                  />
                 )}
                 {activeTab === 'compare' && <CityComparison />}
 

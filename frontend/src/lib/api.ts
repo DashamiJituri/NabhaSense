@@ -48,4 +48,20 @@ export const api = {
     if (!res.ok) throw new Error('Failed to fetch forecast data');
     return res.json();
   },
+
+  async getActionPlan(city: string) {
+    const res = await fetch(`${API_URL}/heat/action-plan/${city}`);
+    if (!res.ok) throw new Error('Failed to fetch action plan');
+    return res.json();
+  },
+
+  async simulateActionPlan(data: object) {
+    const res = await fetch(`${API_URL}/heat/action-plan/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Action plan simulation failed');
+    return res.json();
+  },
 };
