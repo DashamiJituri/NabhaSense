@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '@/lib/api';
+import AlertSystemPanel from '@/components/dashboard/AlertSystemPanel';
 
 interface HeatActionPlanPanelProps {
   city: string;
@@ -266,6 +267,9 @@ export default function HeatActionPlanPanel({ city, baseTemp, humidity, windSpee
           </motion.div>
         )}
       </motion.div>
+
+      {/* ── SMS/WhatsApp Alert Dispatch (PS26083 requirement) ── */}
+      <AlertSystemPanel city={city} />
     </div>
   );
 }

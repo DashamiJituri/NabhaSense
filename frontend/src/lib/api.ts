@@ -64,4 +64,20 @@ export const api = {
     if (!res.ok) throw new Error('Action plan simulation failed');
     return res.json();
   },
+
+  async previewAlert(city: string, channel: string = 'sms') {
+    const res = await fetch(`${API_URL}/heat/alert/preview/${city}?channel=${channel}`);
+    if (!res.ok) throw new Error('Failed to preview alert');
+    return res.json();
+  },
+
+  async sendAlert(data: object) {
+    const res = await fetch(`${API_URL}/heat/alert/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to send alert');
+    return res.json();
+  },
 };

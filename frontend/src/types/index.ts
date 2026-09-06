@@ -173,3 +173,21 @@ export interface ActionPlanSimulationResponse {
   after: { temp: number; thermal: any; mortality: any; plan: ActionPlanResponse };
   alertDowngraded: boolean;
 }
+
+export interface AlertPreviewResponse {
+  city: string;
+  channel: 'sms' | 'whatsapp';
+  overallAlertLevel: string;
+  shouldTrigger: boolean;
+  message: string;
+}
+
+export interface AlertSendResponse {
+  status: 'sent' | 'simulated' | 'failed';
+  channel: string;
+  toNumber: string;
+  message: string;
+  note?: string;
+  twilioSid?: string;
+  error?: string;
+}

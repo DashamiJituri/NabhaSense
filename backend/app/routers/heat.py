@@ -11,6 +11,7 @@ from app.data.demographics import (
 from app.utils.thermal_indices import get_thermal_stress_index
 from app.utils.utci import utci_approx, classify_utci_stress
 from app.utils.acclimatization import classify_wbgt_stress_localized, classify_utci_stress_localized
+from app.services.alert_service import build_alert_message, send_alert
 
 router = APIRouter()
 predictor = HeatPredictor()
@@ -317,6 +318,45 @@ async def get_action_plan(city: str):
         population=demographics["population"],
     )
     return plan
+
+
+@router.get("/alert/preview/{city}")
+async def preview_alert(city: str, channel: str = "sms"):
+    """
+    Preview the exact SMS/WhatsApp message that would go out for a city's
+    current conditions, plus whether it should auto-trigger (any alert
+    level above 'Watch').
+    """
+    plan = await get_action_plan(city)
+    message = build_alert_message(plan, channel)
+    should_trigger = plan["overallAlertLevel"] != "Watch"
+
+    return {
+        "city": plan["city"],
+        "channel": channel,
+        "overallAlertLevel": plan["overallAlertLevel"],
+        "shouldTrigger": should_trigger,
+        "message": message,
+    }
+
+
+@router.post("/alert/send")
+async def send_city_alert(data: dict):
+    """
+    Send (or, without Twilio credentials configured, simulate) an SMS/
+    WhatsApp alert for a city's current Heat Action Plan. Body:
+    { "city": "mumbai", "toNumber": "+91XXXXXXXXXX", "channel": "sms" }
+    """
+    city = data.get("city", "mumbai")
+    to_number = data.get("toNumber", "")
+    channel = data.get("channel", "sms")
+
+    if not to_number:
+        return {"status": "failed", "error": "toNumber is required"}
+
+    plan = await get_action_plan(city)
+    result = send_alert(plan, to_number, channel)
+    return result
 
 
 @router.post("/action-plan/simulate")
