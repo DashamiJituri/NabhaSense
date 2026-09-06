@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from concurrent.futures import ThreadPoolExecutor
 from app.models.predictor import HeatPredictor
 from app.models.mortality_predictor import MortalityRiskPredictor
 from app.models.hsri_calculator import compute_hazard_index, compute_hsri
@@ -429,56 +430,65 @@ async def get_real_data(city: str):
     return get_real_city_data(city)
 
 
+def _build_comparison_entry(city: str) -> dict:
+    """Per-city work for /compare — extracted so it can run in a thread pool."""
+    real_data = get_real_city_data(city)
+    thermal = _compute_thermal_with_utci(
+        city,
+        temp_c=real_data["real_weather"]["temperature"],
+        rh_pct=real_data["real_weather"]["humidity"],
+        wind_speed_ms=real_data["real_weather"]["wind_speed"],
+        shortwave_wm2=real_data["real_weather"].get("shortwave_radiation", 400.0),
+    )
+    demographics = get_city_demographics(city)
+    mortality = mortality_predictor.predict(
+        wbgt=thermal["wbgt"],
+        heat_index=thermal["heatIndex"],
+        elderly_pct=demographics["elderlyPct"],
+        outdoor_worker_pct=demographics["outdoorWorkerPct"],
+    )
+    exposure = get_city_exposure_baseline(city)
+    vi = compute_vulnerability_index(demographics["elderlyPct"], demographics["population"], demographics["population"])
+    ei = compute_exposure_index(
+        exposure["marginalWorkerPct"], exposure["illiteracyPct"], exposure["poorHousingPct"],
+        exposure["noElectricityPct"], exposure["noWaterAccessPct"],
+    )
+    hazard_index = compute_hazard_index(thermal["wbgt"], thermal["utci"])
+    hsri = compute_hsri(hazard_index, vi, ei)
+
+    return {
+        "city": real_data["city"],
+        "currentTemp": real_data["real_weather"]["temperature"],
+        "avgLST": real_data["historical_lst"]["avg_lst"],
+        "suhii": real_data["derived_metrics"]["suhii"],
+        "ndvi": real_data["derived_metrics"]["ndvi"],
+        "ndbi": real_data["derived_metrics"]["ndbi"],
+        "wbgt": thermal["wbgt"],
+        "utci": thermal["utci"],
+        "stressCategory": thermal["stressCategory"],
+        "mortalityRiskIndex": mortality["mortalityRiskIndex"],
+        "riskTier": mortality["riskTier"],
+        "hsri": hsri["hsri"],
+        "hsriTier": hsri["hsriTier"],
+        "dataQuality": real_data["data_quality"],
+    }
+
+
 @router.get("/compare")
 async def compare_cities(cities: str = "mumbai,delhi,bangalore"):
     """
     Multi-city comparison — includes WBGT, UTCI, Mortality Risk Index and
     HSRI alongside LST/NDVI/NDBI/SUHII, so cities compare on actual human
     thermal-stress and health-risk terms, not just raw surface temperature.
-    """
-    city_list = [c.strip() for c in cities.split(",")]
-    results = []
-    for city in city_list[:7]:
-        real_data = get_real_city_data(city)
-        thermal = _compute_thermal_with_utci(
-            city,
-            temp_c=real_data["real_weather"]["temperature"],
-            rh_pct=real_data["real_weather"]["humidity"],
-            wind_speed_ms=real_data["real_weather"]["wind_speed"],
-            shortwave_wm2=real_data["real_weather"].get("shortwave_radiation", 400.0),
-        )
-        demographics = get_city_demographics(city)
-        mortality = mortality_predictor.predict(
-            wbgt=thermal["wbgt"],
-            heat_index=thermal["heatIndex"],
-            elderly_pct=demographics["elderlyPct"],
-            outdoor_worker_pct=demographics["outdoorWorkerPct"],
-        )
-        exposure = get_city_exposure_baseline(city)
-        vi = compute_vulnerability_index(demographics["elderlyPct"], demographics["population"], demographics["population"])
-        ei = compute_exposure_index(
-            exposure["marginalWorkerPct"], exposure["illiteracyPct"], exposure["poorHousingPct"],
-            exposure["noElectricityPct"], exposure["noWaterAccessPct"],
-        )
-        hazard_index = compute_hazard_index(thermal["wbgt"], thermal["utci"])
-        hsri = compute_hsri(hazard_index, vi, ei)
 
-        results.append({
-            "city": real_data["city"],
-            "currentTemp": real_data["real_weather"]["temperature"],
-            "avgLST": real_data["historical_lst"]["avg_lst"],
-            "suhii": real_data["derived_metrics"]["suhii"],
-            "ndvi": real_data["derived_metrics"]["ndvi"],
-            "ndbi": real_data["derived_metrics"]["ndbi"],
-            "wbgt": thermal["wbgt"],
-            "utci": thermal["utci"],
-            "stressCategory": thermal["stressCategory"],
-            "mortalityRiskIndex": mortality["mortalityRiskIndex"],
-            "riskTier": mortality["riskTier"],
-            "hsri": hsri["hsri"],
-            "hsriTier": hsri["hsriTier"],
-            "dataQuality": real_data["data_quality"],
-        })
+    Fetches all cities' weather CONCURRENTLY via a thread pool instead of
+    one-after-another — this was the single biggest cause of City
+    Comparison taking minutes: up to 7 cities x multiple sequential
+    blocking network calls each, now running in parallel.
+    """
+    city_list = [c.strip() for c in cities.split(",")][:7]
+    with ThreadPoolExecutor(max_workers=len(city_list) or 1) as executor:
+        results = list(executor.map(_build_comparison_entry, city_list))
     return {"comparison": results}
 
 

@@ -1,7 +1,32 @@
 import requests
 import pandas as pd
 import numpy as np
+import time
 from datetime import datetime, timedelta
+
+# ── Simple in-memory TTL cache ──────────────────────────────────────────
+# THE core fix for the "every tab takes 2-5 minutes" problem: without this,
+# every single tab (WBGT, Mortality, Forecast, Action Plan, Analysis) was
+# independently re-fetching the SAME city's weather from Open-Meteo, and
+# City Comparison was doing this for up to 7 cities SEQUENTIALLY (up to 21
+# blocking network calls in a row). Weather doesn't meaningfully change
+# second-to-second, so caching each city's fetch for a few minutes turns
+# every tab-switch after the first load into a near-instant cache hit
+# instead of a fresh network round-trip.
+_CACHE: dict = {}
+_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+
+def _cache_get(key: str, ttl: int = _CACHE_TTL_SECONDS):
+    entry = _CACHE.get(key)
+    if entry and (time.time() - entry[1]) < ttl:
+        return entry[0]
+    return None
+
+
+def _cache_set(key: str, value):
+    _CACHE[key] = (value, time.time())
+
 
 CITIES = {
     "mumbai":    {"lat": 19.0760, "lng": 72.8777, "state": "Maharashtra"},
@@ -14,7 +39,11 @@ CITIES = {
 }
 
 def fetch_real_weather(lat: float, lng: float) -> dict:
-    """Fetch real current weather from Open-Meteo — 100% free, no API key"""
+    """Fetch real current weather from Open-Meteo — 100% free, no API key. Cached for 5 min."""
+    cache_key = f"weather:{round(lat, 3)}:{round(lng, 3)}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     try:
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
@@ -33,10 +62,10 @@ def fetch_real_weather(lat: float, lng: float) -> dict:
             "timezone": "Asia/Kolkata",
             "forecast_days": 1,
         }
-        res = requests.get(url, params=params, timeout=10)
+        res = requests.get(url, params=params, timeout=6)
         data = res.json()
         current = data.get("current", {})
-        return {
+        result = {
             "temperature": current.get("temperature_2m", 35.0),
             "humidity": current.get("relative_humidity_2m", 60.0),
             "apparent_temp": current.get("apparent_temperature", 38.0),
@@ -46,6 +75,8 @@ def fetch_real_weather(lat: float, lng: float) -> dict:
             "source": "Open-Meteo Real-time API",
             "timestamp": datetime.now().isoformat(),
         }
+        _cache_set(cache_key, result)
+        return result
     except Exception as e:
         print(f"Weather API error: {e}")
         return {
@@ -60,7 +91,11 @@ def fetch_real_weather(lat: float, lng: float) -> dict:
         }
 
 def fetch_historical_lst(lat: float, lng: float) -> dict:
-    """Fetch historical temperature data as LST proxy — Open-Meteo Archive"""
+    """Fetch historical temperature data as LST proxy — Open-Meteo Archive. Cached 30 min (30-day rolling average barely changes hour to hour)."""
+    cache_key = f"historical:{round(lat, 3)}:{round(lng, 3)}"
+    cached = _cache_get(cache_key, ttl=1800)  # 30 min — 30-day rolling avg barely changes hourly
+    if cached is not None:
+        return cached
     try:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -79,7 +114,7 @@ def fetch_historical_lst(lat: float, lng: float) -> dict:
             ],
             "timezone": "Asia/Kolkata",
         }
-        res = requests.get(url, params=params, timeout=10)
+        res = requests.get(url, params=params, timeout=6)
         data = res.json()
         daily = data.get("daily", {})
         
@@ -90,7 +125,7 @@ def fetch_historical_lst(lat: float, lng: float) -> dict:
         # LST is typically 3-8°C higher than air temp in urban areas
         lst_values = [t + np.random.uniform(3, 8) for t in temps_max if t is not None]
         
-        return {
+        result = {
             "avg_lst": round(float(np.mean(lst_values)), 2),
             "max_lst": round(float(np.max(lst_values)), 2),
             "min_lst": round(float(np.min(lst_values)), 2),
@@ -98,6 +133,8 @@ def fetch_historical_lst(lat: float, lng: float) -> dict:
             "period": f"{start_date} to {end_date}",
             "source": "Open-Meteo Archive (30-day)",
         }
+        _cache_set(cache_key, result)
+        return result
     except Exception as e:
         print(f"Historical API error: {e}")
         return {
@@ -115,8 +152,13 @@ def fetch_forecast(lat: float, lng: float, days: int = 5) -> list:
     peak-heat hour (max temperature) for each of the next `days` days.
     That peak-hour reading is what feeds the WBGT/mortality-risk forecast —
     early-warning systems care about the worst hour of the day, not the
-    daily average.
+    daily average. Cached for 15 min — a forecast doesn't need re-fetching
+    on every single tab click.
     """
+    cache_key = f"forecast:{round(lat, 3)}:{round(lng, 3)}:{days}"
+    cached = _cache_get(cache_key, ttl=900)
+    if cached is not None:
+        return cached
     try:
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
@@ -131,7 +173,7 @@ def fetch_forecast(lat: float, lng: float, days: int = 5) -> list:
             "timezone": "Asia/Kolkata",
             "forecast_days": min(days, 7),
         }
-        res = requests.get(url, params=params, timeout=10)
+        res = requests.get(url, params=params, timeout=6)
         data = res.json()
         hourly = data.get("hourly", {})
 
@@ -170,6 +212,7 @@ def fetch_forecast(lat: float, lng: float, days: int = 5) -> list:
                 "shortwaveRadiation": round(e["radiation"] or 400.0, 1),
             })
 
+        _cache_set(cache_key, forecast_days)
         return forecast_days
     except Exception as ex:
         print(f"Forecast API error: {ex}")
