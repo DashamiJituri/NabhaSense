@@ -174,28 +174,36 @@ export default function HeatActionPlanPanel({ city, baseTemp, humidity, windSpee
           )}
         </motion.div>
 
-        {/* Hospital Capacity Alert */}
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-          style={{ ...cardStyle, borderColor: plan.hospitalCapacityAlert.exceedsCapacity ? 'rgba(255,61,61,0.4)' : 'rgba(30,45,74,0.8)' }}>
-          <div style={{ fontSize: '1.4rem', marginBottom: '0.5rem' }}>🏥</div>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#f0f4ff', marginBottom: '0.5rem' }}>Hospital Capacity</div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: plan.hospitalCapacityAlert.exceedsCapacity ? '#ff3d3d' : '#00d4aa' }}>
-            {plan.hospitalCapacityAlert.capacityUtilizationPct}%
+        {/* Hospital Capacity Alert — optional chaining so an out-of-sync backend can't crash the page */}
+        {plan.hospitalCapacityAlert ? (
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+            style={{ ...cardStyle, borderColor: plan.hospitalCapacityAlert.exceedsCapacity ? 'rgba(255,61,61,0.4)' : 'rgba(30,45,74,0.8)' }}>
+            <div style={{ fontSize: '1.4rem', marginBottom: '0.5rem' }}>🏥</div>
+            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#f0f4ff', marginBottom: '0.5rem' }}>Hospital Capacity</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: plan.hospitalCapacityAlert.exceedsCapacity ? '#ff3d3d' : '#00d4aa' }}>
+              {plan.hospitalCapacityAlert.capacityUtilizationPct}%
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#8892b0', marginBottom: '0.3rem' }}>
+              {plan.hospitalCapacityAlert.predictedHeatAdmissions?.toLocaleString()} predicted admissions vs {plan.hospitalCapacityAlert.surgeCapacityBeds?.toLocaleString()} surge beds
+            </div>
+            {plan.hospitalCapacityAlert.exceedsCapacity ? (
+              <div style={{ fontSize: '0.72rem', color: '#ff6b35', fontWeight: 600 }}>⚠️ Surge capacity would be exceeded — coordinate with neighboring facilities</div>
+            ) : (
+              <div style={{ fontSize: '0.72rem', color: '#00d4aa' }}>✓ Within surge capacity</div>
+            )}
+          </motion.div>
+        ) : (
+          <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5a6b82', fontSize: '0.78rem' }}>
+            🏥 Hospital capacity data unavailable — backend may still be deploying
           </div>
-          <div style={{ fontSize: '0.72rem', color: '#8892b0', marginBottom: '0.3rem' }}>
-            {plan.hospitalCapacityAlert.predictedHeatAdmissions.toLocaleString()} predicted admissions vs {plan.hospitalCapacityAlert.surgeCapacityBeds.toLocaleString()} surge beds
-          </div>
-          {plan.hospitalCapacityAlert.exceedsCapacity ? (
-            <div style={{ fontSize: '0.72rem', color: '#ff6b35', fontWeight: 600 }}>⚠️ Surge capacity would be exceeded — coordinate with neighboring facilities</div>
-          ) : (
-            <div style={{ fontSize: '0.72rem', color: '#00d4aa' }}>✓ Within surge capacity</div>
-          )}
-        </motion.div>
+        )}
       </div>
 
-      <div style={{ fontSize: '0.65rem', color: '#5a6b82', marginTop: '-0.5rem' }}>
-        {plan.hospitalCapacityAlert.note}
-      </div>
+      {plan.hospitalCapacityAlert?.note && (
+        <div style={{ fontSize: '0.65rem', color: '#5a6b82', marginTop: '-0.5rem' }}>
+          {plan.hospitalCapacityAlert.note}
+        </div>
+      )}
 
       {/* ── Mitigation Scenario Tester ── */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} style={cardStyle}>
